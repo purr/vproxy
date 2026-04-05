@@ -34,7 +34,7 @@ use self::{
     tls::{RustlsAcceptor, RustlsConfig},
 };
 use super::{Acceptor, Connector, Context, Server};
-use crate::{connect::TcpConnector, ext::Extension};
+use crate::ext::Extension;
 
 /// HTTP acceptor.
 #[derive(Clone)]
@@ -234,35 +234,47 @@ impl Handler {
         };
 
         if Method::CONNECT == req.method() {
-            // Received an HTTP request like:
-            // ```
-            // CONNECT www.domain.com:443 HTTP/1.1
-            // Host: www.domain.com:443
-            // Proxy-Connection: Keep-Alive
-            // ```
-            //
-            // When HTTP method is CONNECT we should return an empty body,
-            // then we can eventually upgrade the connection and talk a new protocol.
-            //
-            // Note: only after client received an empty body with STATUS_OK can the
-            // connection be upgraded, so we can't return a response inside
-            // `on_upgrade` future.
+            // RFC 9110: establish the outbound tunnel to the authority, then respond with 2xx.
+            // Dialing after 200 lets clients start TLS while we still connect; their handshake
+            // then stalls until we relay (seen as CONNECT/TLS timeouts for slow or stuck dials).
             if let Some(authority) = req.uri().authority().cloned() {
-                tokio::spawn(async move {
-                    match hyper::upgrade::on(req).await {
-                        Ok(upgraded) => {
-                            let connector = self.connector.tcp(extension);
-                            if let Err(e) = tunnel(socket, authority, upgraded, connector).await {
-                                tracing::debug!("[HTTP] server io error: {}", e);
-                            };
-                        }
-                        Err(e) => tracing::debug!("[HTTP] upgrade error: {}", e),
+                let request_line = format!("{} {} {:?}", req.method(), req.uri(), req.version());
+                let connector_tcp = self.connector.tcp(extension);
+                match connector_tcp.connect(authority.clone()).await {
+                    Ok(mut server) => {
+                        tokio::spawn(async move {
+                            match hyper::upgrade::on(req).await {
+                                Ok(upgraded) => {
+                                    if let Err(e) = tunnel(socket, authority, upgraded, server).await
+                                    {
+                                        tracing::warn!(
+                                            "[HTTP] CONNECT tunnel error client={} err={}",
+                                            socket, e
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!("[HTTP] upgrade error: {}", e);
+                                    let _ = server.shutdown().await;
+                                }
+                            }
+                        });
+                        let mut resp = Response::new(empty());
+                        *resp.status_mut() = StatusCode::OK;
+                        Ok(resp)
                     }
-                });
-
-                Ok(Response::new(empty()))
+                    Err(e) => {
+                        tracing::warn!(
+                            "[HTTP] CONNECT outbound failed client={} line={} authority={} err={}",
+                            socket, request_line, authority, e
+                        );
+                        let mut resp = Response::new(full("outbound connection failed"));
+                        *resp.status_mut() = StatusCode::BAD_GATEWAY;
+                        Ok(resp)
+                    }
+                }
             } else {
-                tracing::warn!("[HTTP] CONNECT host is not socket addr: {:?}", req.uri());
+                tracing::warn!("[HTTP] CONNECT missing authority: {:?}", req.uri());
                 let mut resp = Response::new(full("CONNECT must be to a socket address"));
                 *resp.status_mut() = StatusCode::BAD_REQUEST;
 
@@ -291,17 +303,14 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
         .boxed()
 }
 
-// Create a TCP connection to host:port, build a tunnel between the connection
-// and the upgraded connection
+// Relay bytes between the upgraded client connection and an already-connected outbound stream.
 async fn tunnel(
     source: SocketAddr,
     target: Authority,
     upgraded: Upgraded,
-    connector: TcpConnector<'_>,
+    mut server: TcpStream,
 ) -> std::io::Result<()> {
-    tracing::info!("[HTTP] {source} -> {target} forwarding connection");
-
-    let mut server = connector.connect(target).await?;
+    tracing::debug!("[HTTP] {source} -> {target} relay (outbound ready)");
 
     #[cfg(target_os = "linux")]
     let res =
@@ -322,7 +331,7 @@ async fn tunnel(
 
     match res {
         Ok((from_client, from_server)) => {
-            tracing::info!(
+            tracing::debug!(
                 "[HTTP] client wrote {} bytes and received {} bytes",
                 from_client,
                 from_server
