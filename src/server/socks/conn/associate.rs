@@ -67,7 +67,7 @@ impl<S: Default> UdpAssociate<S> {
     /// option.
     #[inline]
     pub fn linger(&self) -> std::io::Result<Option<Duration>> {
-        self.stream.linger()
+        super::tcp_stream_linger(&self.stream)
     }
 
     /// Sets the linger duration of this socket by setting the `SO_LINGER`
@@ -83,7 +83,7 @@ impl<S: Default> UdpAssociate<S> {
     /// quickly as possible.
     #[inline]
     pub fn set_linger(&self, dur: Option<Duration>) -> std::io::Result<()> {
-        self.stream.set_linger(dur)
+        super::tcp_stream_set_linger(&self.stream, dur)
     }
 
     /// Gets the value of the `TCP_NODELAY` option on this socket.

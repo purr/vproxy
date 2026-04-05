@@ -4,6 +4,7 @@ pub mod connect;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+use socket2::SockRef;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use self::{associate::UdpAssociate, bind::Bind, connect::Connect};
@@ -12,6 +13,21 @@ use super::{
     error::Error,
     proto::{self, Address, AsyncStreamOperation, Command, Method, handshake},
 };
+
+/// Tokio deprecated `TcpStream::{linger,set_linger}`; use `socket2` so callers keep the same
+/// behavior without blocking the runtime on drop.
+#[inline]
+pub(super) fn tcp_stream_linger(s: &TcpStream) -> std::io::Result<Option<Duration>> {
+    SockRef::from(s).linger()
+}
+
+#[inline]
+pub(super) fn tcp_stream_set_linger(
+    s: &TcpStream,
+    dur: Option<Duration>,
+) -> std::io::Result<()> {
+    SockRef::from(s).set_linger(dur)
+}
 
 /// An incoming connection. This may not be a valid socks5 connection. You need
 /// to call [`handshake()`](#method.handshake) to perform the socks5 handshake.
@@ -49,7 +65,7 @@ impl IncomingConnection {
     /// Reads the linger duration for this socket by getting the `SO_LINGER`
     #[inline]
     pub fn linger(&self) -> std::io::Result<Option<Duration>> {
-        self.stream.linger()
+        tcp_stream_linger(&self.stream)
     }
 
     /// Sets the linger duration of this socket by setting the `SO_LINGER`
@@ -65,7 +81,7 @@ impl IncomingConnection {
     /// quickly as possible.
     #[inline]
     pub fn set_linger(&self, dur: Option<Duration>) -> std::io::Result<()> {
-        self.stream.set_linger(dur)
+        tcp_stream_set_linger(&self.stream, dur)
     }
 
     /// Gets the value of the `TCP_NODELAY` option on this socket.
@@ -202,7 +218,7 @@ impl AuthenticatedStream {
     /// option.
     #[inline]
     pub fn linger(&self) -> std::io::Result<Option<Duration>> {
-        self.0.linger()
+        tcp_stream_linger(&self.0)
     }
 
     /// Sets the linger duration of this socket by setting the `SO_LINGER`
@@ -218,7 +234,7 @@ impl AuthenticatedStream {
     /// quickly as possible.
     #[inline]
     pub fn set_linger(&self, dur: Option<Duration>) -> std::io::Result<()> {
-        self.0.set_linger(dur)
+        tcp_stream_set_linger(&self.0, dur)
     }
 
     /// Gets the value of the `TCP_NODELAY` option on this socket.
