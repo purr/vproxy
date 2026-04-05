@@ -280,11 +280,7 @@ fn managed_by_pm2(sys: &System, proc: &sysinfo::Process) -> bool {
     false
 }
 
-fn manager_label(
-    sys: &System,
-    proc: &sysinfo::Process,
-    pidfile_pid: Option<u32>,
-) -> &'static str {
+fn manager_label(sys: &System, proc: &sysinfo::Process, pidfile_pid: Option<u32>) -> &'static str {
     if pidfile_pid.is_some_and(|p| p == proc.pid().as_u32()) {
         return "daemon";
     }

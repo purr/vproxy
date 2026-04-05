@@ -245,11 +245,13 @@ impl Handler {
                         tokio::spawn(async move {
                             match hyper::upgrade::on(req).await {
                                 Ok(upgraded) => {
-                                    if let Err(e) = tunnel(socket, authority, upgraded, server).await
+                                    if let Err(e) =
+                                        tunnel(socket, authority, upgraded, server).await
                                     {
                                         tracing::warn!(
                                             "[HTTP] CONNECT tunnel error client={} err={}",
-                                            socket, e
+                                            socket,
+                                            e
                                         );
                                     }
                                 }
@@ -266,7 +268,10 @@ impl Handler {
                     Err(e) => {
                         tracing::warn!(
                             "[HTTP] CONNECT outbound failed client={} line={} authority={} err={}",
-                            socket, request_line, authority, e
+                            socket,
+                            request_line,
+                            authority,
+                            e
                         );
                         let mut resp = Response::new(full("outbound connection failed"));
                         *resp.status_mut() = StatusCode::BAD_GATEWAY;
