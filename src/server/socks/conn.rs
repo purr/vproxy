@@ -22,10 +22,7 @@ pub(super) fn tcp_stream_linger(s: &TcpStream) -> std::io::Result<Option<Duratio
 }
 
 #[inline]
-pub(super) fn tcp_stream_set_linger(
-    s: &TcpStream,
-    dur: Option<Duration>,
-) -> std::io::Result<()> {
+pub(super) fn tcp_stream_set_linger(s: &TcpStream, dur: Option<Duration>) -> std::io::Result<()> {
     SockRef::from(s).set_linger(dur)
 }
 
