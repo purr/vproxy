@@ -315,7 +315,7 @@ async fn tunnel(
     upgraded: Upgraded,
     mut server: TcpStream,
 ) -> std::io::Result<()> {
-    tracing::debug!("[HTTP] {source} -> {target} relay (outbound ready)");
+    tracing::info!("[HTTP] {source} -> {target} forwarding connection");
 
     #[cfg(target_os = "linux")]
     let res =
@@ -336,7 +336,7 @@ async fn tunnel(
 
     match res {
         Ok((from_client, from_server)) => {
-            tracing::debug!(
+            tracing::info!(
                 "[HTTP] client wrote {} bytes and received {} bytes",
                 from_client,
                 from_server

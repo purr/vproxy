@@ -149,7 +149,7 @@ async fn handle_connect(
 ) -> std::io::Result<()> {
     let outbound = match address {
         Address::SocketAddress(addr) => {
-            tracing::debug!(
+            tracing::info!(
                 "[SOCKS5][CONNECT] {} -> {} forwarding connection",
                 connect.peer_addr()?,
                 addr
@@ -157,7 +157,7 @@ async fn handle_connect(
             connector.connect(addr).await
         }
         Address::DomainAddress(domain, port) => {
-            tracing::debug!(
+            tracing::info!(
                 "[SOCKS5][CONNECT] {} -> {}:{} forwarding connection",
                 connect.peer_addr()?,
                 domain,
@@ -175,7 +175,7 @@ async fn handle_connect(
 
             match io::copy_bidirectional(&mut inbound, &mut outbound).await {
                 Ok((from_client, from_server)) => {
-                    tracing::debug!(
+                    tracing::info!(
                         "[SOCKS5][CONNECT] client wrote {} bytes and received {} bytes",
                         from_client,
                         from_server
@@ -277,13 +277,13 @@ async fn handle_udp(
 
                 match dst_addr {
                     Address::SocketAddress(target_addr) => {
-                        tracing::trace!("[SOCKS5][UDP] {src_addr} -> {target_addr} forwarding packet, size {}", pkt.len());
+                        tracing::info!("[SOCKS5][UDP] {src_addr} -> {target_addr} forwarding packet, size {}", pkt.len());
                         connector
                             .send_packet(&pkt, target_addr, &preferred_outbound, fallback_outbound.as_ref())
                             .await?;
                     }
                     Address::DomainAddress(domain, port) => {
-                        tracing::trace!("[SOCKS5][UDP] {src_addr} -> {domain}:{port} forwarding packet, size {}", pkt.len());
+                        tracing::info!("[SOCKS5][UDP] {src_addr} -> {domain}:{port} forwarding packet, size {}", pkt.len());
                         connector
                             .send_packet(&pkt, (domain, port), &preferred_outbound, fallback_outbound.as_ref())
                             .await?;
@@ -298,7 +298,7 @@ async fn handle_udp(
                 let (len, remote_addr) = preferred_outbound.recv_from(&mut buf).await?;
                 let src_addr = SocketAddr::new(src_ip, src_port.load(Ordering::Relaxed));
 
-                tracing::trace!("[SOCKS5][UDP] {src_addr} <- {remote_addr} feedback to incoming, packet size {len}");
+                tracing::info!("[SOCKS5][UDP] {src_addr} <- {remote_addr} feedback to incoming, packet size {len}");
 
                 inbound
                     .send_to(&buf[..len], 0, remote_addr.into(), src_addr)
@@ -313,7 +313,7 @@ async fn handle_udp(
                     let (len, remote_addr) = fallback_outbound.recv_from(&mut buf).await?;
                     let src_addr = SocketAddr::new(src_ip, src_port.load(Ordering::Relaxed));
 
-                    tracing::trace!("[SOCKS5][UDP] {src_addr} <- {remote_addr} feedback to incoming, packet size {len}");
+                    tracing::info!("[SOCKS5][UDP] {src_addr} <- {remote_addr} feedback to incoming, packet size {len}");
 
                     inbound
                         .send_to(&buf[..len], 0, remote_addr.into(), src_addr)

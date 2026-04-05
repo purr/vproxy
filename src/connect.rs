@@ -367,10 +367,10 @@ impl TcpConnector<'_> {
         }
     }
 
-    /// `-i` CIDR is only meaningful when the outbound socket family matches the remote.
-    /// Binding an IPv6 address from a v6 CIDR and calling `connect` to an IPv4 target is EINVAL;
-    /// same for v4 CIDR → v6 remote. In those cases use the default route (no CIDR bind) or
-    /// fallback-only when `-f` is set.
+    /// `-i` CIDR is only used when the remote address family matches (v6 pool → v6 peer, etc.).
+    /// With **only** `-i` (no `-f`), mismatched destinations are skipped or rejected — vproxy does
+    /// not silently fall back to the kernel default for the other family (that would bypass your
+    /// chosen egress pool). Use `-f <addr>` when you need cross-family source binding.
     #[inline]
     fn cidr_matches_target(cidr: IpCidr, target_addr: SocketAddr) -> bool {
         matches!(
@@ -407,17 +407,17 @@ impl TcpConnector<'_> {
                     )
                     .await?
                 }
-                (Some(cidr), None, false) => {
-                    tracing::debug!(
-                        "[TCP] skip -i bind for {} ({} CIDR cannot reach this address family)",
-                        target_addr,
-                        match cidr {
-                            IpCidr::V4(_) => "IPv4",
-                            IpCidr::V6(_) => "IPv6",
-                        }
-                    );
-                    timeout(self.inner.connect_timeout, TcpStream::connect(target_addr)).await?
-                }
+                (Some(cidr), None, false) => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    match cidr {
+                        IpCidr::V6(_) => format!(
+                            "IPv4 destination {target_addr} incompatible with IPv6 -i; use `-f <IPv4>` or an IPv6-only remote"
+                        ),
+                        IpCidr::V4(_) => format!(
+                            "IPv6 destination {target_addr} incompatible with IPv4 -i; use `-f <IPv6>` or an IPv4-only remote"
+                        ),
+                    },
+                )),
                 (Some(cidr), Some(fallback), true) => {
                     timeout(
                         self.inner.connect_timeout,
@@ -441,7 +441,7 @@ impl TcpConnector<'_> {
                 }
             }
             .and_then(|stream| {
-                tracing::debug!("[TCP] connect {} via {}", target_addr, stream.local_addr()?);
+                tracing::info!("[TCP] connect {} via {}", target_addr, stream.local_addr()?);
                 Ok(stream)
             });
 
@@ -646,7 +646,7 @@ impl UdpConnector<'_> {
         socket: &UdpSocket,
     ) -> std::io::Result<usize> {
         socket.send_to(pkt, addr).await.and_then(|size| {
-            tracing::trace!(
+            tracing::info!(
                 "[UDP] UDP packet sent to {} via {}, size: {}",
                 addr,
                 socket.local_addr()?,
