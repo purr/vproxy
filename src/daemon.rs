@@ -13,7 +13,7 @@ use nix::{
     unistd::{Pid as NixPid, Uid},
 };
 use sysinfo::{
-    Pid as SysPid, ProcessRefreshKind, ProcessesToUpdate, System, MINIMUM_CPU_UPDATE_INTERVAL,
+    MINIMUM_CPU_UPDATE_INTERVAL, Pid as SysPid, ProcessRefreshKind, ProcessesToUpdate, System,
 };
 
 use crate::{BootArgs, server};
@@ -131,9 +131,7 @@ impl Daemon {
         sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
-            ProcessRefreshKind::nothing()
-                .with_cpu()
-                .without_tasks(),
+            ProcessRefreshKind::nothing().with_cpu().without_tasks(),
         );
 
         let pidfile_pid = self.pidfile_raw().and_then(|pid| {
@@ -294,9 +292,7 @@ fn environ_has_pm2_marker(env: &[OsString]) -> bool {
 }
 
 fn process_suggests_pm2(p: &sysinfo::Process) -> bool {
-    cmdline_has_pm2_marker(p.cmd())
-        || exe_has_pm2_marker(p)
-        || environ_has_pm2_marker(p.environ())
+    cmdline_has_pm2_marker(p.cmd()) || exe_has_pm2_marker(p) || environ_has_pm2_marker(p.environ())
 }
 
 fn managed_by_pm2(sys: &System, proc: &sysinfo::Process) -> bool {
