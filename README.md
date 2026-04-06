@@ -13,13 +13,13 @@ A high-performance `HTTP`/`HTTPS`/`SOCKS5` proxy server
 ## Features
 
 - Proxy extensions
-- Concurrency limits 
+- Concurrency limits
 - Basic authentication
 - Auto protocol detection
 - Kernel-space zero-copy
 - `IPv4`/`IPv6` dual-stack
 - Service binding to specific `CIDR` addresses
-- SOCKS5: `CONNECT`/`BIND`/`ASSOCIATE`  
+- SOCKS5: `CONNECT`/`BIND`/`ASSOCIATE`
 
 ## Manual
 
@@ -71,7 +71,7 @@ wget -qO- https://raw.githubusercontent.com/0x676e67/vproxy/main/.github/install
 cargo install vproxy
 ```
 
-- Dokcer
+- Docker
 
 ```bash
 docker run --rm -it ghcr.io/0x676e67/vproxy:latest run http

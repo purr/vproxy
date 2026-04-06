@@ -169,9 +169,9 @@ pub struct BootArgs {
     )]
     bind: SocketAddr,
 
-    /// Maximum concurrent active connections.
-    /// Protects resource exhaustion. Raise cautiously.
-    /// e.g. 128.
+    /// TCP listen backlog (queued connections waiting for `accept`), not a cap on active sessions.
+    /// OS may clamp the effective value. Raise if you see refused connections under burst load.
+    /// e.g. 2048.
     #[arg(long, short = 'c', default_value = "1024", verbatim_doc_comment)]
     concurrent: u32,
 

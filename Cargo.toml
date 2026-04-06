@@ -1,6 +1,6 @@
 [package]
 name = "vproxy"
-version = "2.5.5"
+version = "2.5.9"
 authors = ["gngppz@gmail.com"]
 description = "A high-performance HTTP/HTTPS/SOCKS5 proxy server"
 repository = "https://github.com/0x676e67/vproxy"

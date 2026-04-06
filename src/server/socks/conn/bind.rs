@@ -87,7 +87,7 @@ impl Bind<NeedFirstReply> {
     /// Reads the linger duration for this socket by getting the `SO_LINGER`
     #[inline]
     pub fn linger(&self) -> std::io::Result<Option<Duration>> {
-        self.stream.linger()
+        super::tcp_stream_linger(&self.stream)
     }
 
     /// Sets the linger duration of this socket by setting the `SO_LINGER`
@@ -103,7 +103,7 @@ impl Bind<NeedFirstReply> {
     /// quickly as possible.
     #[inline]
     pub fn set_linger(&self, dur: Option<Duration>) -> std::io::Result<()> {
-        self.stream.set_linger(dur)
+        super::tcp_stream_set_linger(&self.stream, dur)
     }
 
     /// Gets the value of the `TCP_NODELAY` option on this socket.
@@ -189,7 +189,7 @@ impl Bind<NeedSecondReply> {
     /// Reads the linger duration for this socket by getting the `SO_LINGER`
     #[inline]
     pub fn linger(&self) -> std::io::Result<Option<Duration>> {
-        self.stream.linger()
+        super::tcp_stream_linger(&self.stream)
     }
 
     /// Sets the linger duration of this socket by setting the `SO_LINGER`
@@ -205,7 +205,7 @@ impl Bind<NeedSecondReply> {
     /// quickly as possible.
     #[inline]
     pub fn set_linger(&self, dur: Option<Duration>) -> std::io::Result<()> {
-        self.stream.set_linger(dur)
+        super::tcp_stream_set_linger(&self.stream, dur)
     }
 
     /// Gets the value of the `TCP_NODELAY` option on this socket.
