@@ -12,7 +12,9 @@ use nix::{
     sys::signal,
     unistd::{Pid as NixPid, Uid},
 };
-use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
+use sysinfo::{
+    Pid as SysPid, ProcessRefreshKind, ProcessesToUpdate, System, MINIMUM_CPU_UPDATE_INTERVAL,
+};
 
 use crate::{BootArgs, server};
 
@@ -124,17 +126,26 @@ impl Daemon {
     pub fn status(&self) -> crate::Result<()> {
         let mut sys = System::new();
         sys.refresh_processes(ProcessesToUpdate::All, true);
+        // CPU usage needs two samples; first refresh is the baseline.
+        std::thread::sleep(MINIMUM_CPU_UPDATE_INTERVAL);
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing()
+                .with_cpu()
+                .without_tasks(),
+        );
 
         let pidfile_pid = self.pidfile_raw().and_then(|pid| {
             sys.process(SysPid::from_u32(pid))
-                .filter(|p| is_vproxy_process(p))
+                .filter(|p| is_listed_vproxy_process(p))
                 .map(|_| pid)
         });
 
         let mut rows: Vec<_> = sys
             .processes()
             .iter()
-            .filter(|(_, p)| is_vproxy_process(p))
+            .filter(|(_, p)| is_listed_vproxy_process(p))
             .map(|(pid, p)| (*pid, p))
             .collect();
 
@@ -216,7 +227,7 @@ impl Daemon {
 
         let sys_pid = SysPid::from_u32(pid);
         if let Some(process) = sys.process(sys_pid) {
-            if is_vproxy_process(process) {
+            if is_listed_vproxy_process(process) {
                 return Ok(Some(pid));
             }
             println!(
@@ -252,16 +263,44 @@ fn is_vproxy_process(p: &sysinfo::Process) -> bool {
         .is_some_and(|n| n == vproxy_exe_name())
 }
 
+/// Linux lists each task under `/proc/.../task/` as its own PID; skip those so `ps` shows one row
+/// per real process (thread-group leader only).
+#[inline]
+fn is_listed_vproxy_process(p: &sysinfo::Process) -> bool {
+    is_vproxy_process(p) && p.thread_kind().is_none()
+}
+
+fn bytes_contain_pm2(b: &[u8]) -> bool {
+    b.windows(3).any(|w| w.eq_ignore_ascii_case(b"pm2"))
+}
+
 fn cmdline_has_pm2_marker(cmd: &[OsString]) -> bool {
-    cmd.iter().any(|arg| {
-        let s = arg.to_string_lossy();
-        let b = s.as_bytes();
-        b.windows(3).any(|w| w.eq_ignore_ascii_case(b"pm2"))
+    cmd.iter()
+        .any(|arg| bytes_contain_pm2(arg.as_os_str().as_encoded_bytes()))
+}
+
+fn exe_has_pm2_marker(p: &sysinfo::Process) -> bool {
+    p.exe()
+        .is_some_and(|path| bytes_contain_pm2(path.as_os_str().as_encoded_bytes()))
+}
+
+fn environ_has_pm2_marker(env: &[OsString]) -> bool {
+    env.iter().any(|e| {
+        e.to_string_lossy()
+            .as_bytes()
+            .get(..4)
+            .is_some_and(|head| head.eq_ignore_ascii_case(b"PM2_"))
     })
 }
 
+fn process_suggests_pm2(p: &sysinfo::Process) -> bool {
+    cmdline_has_pm2_marker(p.cmd())
+        || exe_has_pm2_marker(p)
+        || environ_has_pm2_marker(p.environ())
+}
+
 fn managed_by_pm2(sys: &System, proc: &sysinfo::Process) -> bool {
-    if cmdline_has_pm2_marker(proc.cmd()) {
+    if process_suggests_pm2(proc) {
         return true;
     }
     let mut next = proc.parent();
@@ -272,7 +311,7 @@ fn managed_by_pm2(sys: &System, proc: &sysinfo::Process) -> bool {
         let Some(parent) = sys.process(ppid) else {
             break;
         };
-        if cmdline_has_pm2_marker(parent.cmd()) {
+        if process_suggests_pm2(parent) {
             return true;
         }
         next = parent.parent();

@@ -234,9 +234,9 @@ impl Handler {
         };
 
         if Method::CONNECT == req.method() {
-            // RFC 9110: establish the outbound tunnel to the authority, then respond with 2xx.
-            // Dialing after 200 lets clients start TLS while we still connect; their handshake
-            // then stalls until we relay (seen as CONNECT/TLS timeouts for slow or stuck dials).
+            // RFC 9110: connect to the authority before sending 2xx. On failure, return 502 so the
+            // client is not told the tunnel succeeded. After 2xx, wait for the HTTP upgrade, then
+            // relay between the upgraded stream and this outbound socket.
             if let Some(authority) = req.uri().authority().cloned() {
                 let request_line = format!("{} {} {:?}", req.method(), req.uri(), req.version());
                 let connector_tcp = self.connector.tcp(extension);
