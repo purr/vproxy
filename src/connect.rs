@@ -367,6 +367,18 @@ impl TcpConnector<'_> {
         }
     }
 
+    /// `-i` CIDR is only used when the remote address family matches (v6 pool → v6 peer, etc.).
+    /// With **only** `-i` (no `-f`), mismatched destinations are skipped or rejected — vproxy does
+    /// not silently fall back to the kernel default for the other family (that would bypass your
+    /// chosen egress pool). Use `-f <addr>` when you need cross-family source binding.
+    #[inline]
+    fn cidr_matches_target(cidr: IpCidr, target_addr: SocketAddr) -> bool {
+        matches!(
+            (cidr, target_addr),
+            (IpCidr::V4(_), SocketAddr::V4(_)) | (IpCidr::V6(_), SocketAddr::V6(_))
+        )
+    }
+
     /// Attempts to establish a TCP connection to each of the target addresses
     /// in the provided iterator using the provided extensions.
     async fn connect_with_addrs(
@@ -375,29 +387,56 @@ impl TcpConnector<'_> {
     ) -> std::io::Result<TcpStream> {
         let mut last_err = None;
         for target_addr in addrs {
-            let res = match (self.inner.cidr, &self.inner.fallback) {
-                (None, Some(fallback)) => {
+            let cidr_ok = self
+                .inner
+                .cidr
+                .is_some_and(|c| Self::cidr_matches_target(c, target_addr));
+
+            let res = match (self.inner.cidr, &self.inner.fallback, cidr_ok) {
+                (None, Some(fallback), _) => {
                     timeout(
                         self.inner.connect_timeout,
                         self.connect_with_fallback(target_addr, fallback),
                     )
                     .await?
                 }
-                (Some(cidr), None) => {
+                (Some(cidr), None, true) => {
                     timeout(
                         self.inner.connect_timeout,
                         self.connect_with_cidr(target_addr, cidr),
                     )
                     .await?
                 }
-                (Some(cidr), Some(fallback)) => {
+                (Some(cidr), None, false) => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    match cidr {
+                        IpCidr::V6(_) => format!(
+                            "IPv4 destination {target_addr} incompatible with IPv6 -i; use `-f <IPv4>` or an IPv6-only remote"
+                        ),
+                        IpCidr::V4(_) => format!(
+                            "IPv6 destination {target_addr} incompatible with IPv4 -i; use `-f <IPv6>` or an IPv4-only remote"
+                        ),
+                    },
+                )),
+                (Some(cidr), Some(fallback), true) => {
                     timeout(
                         self.inner.connect_timeout,
                         self.connect_with_cidr_fallback(target_addr, cidr, fallback),
                     )
                     .await?
                 }
-                (None, None) => {
+                (Some(_cidr), Some(fallback), false) => {
+                    tracing::debug!(
+                        "[TCP] skip -i bind for {}, using -f only (address family mismatch)",
+                        target_addr
+                    );
+                    timeout(
+                        self.inner.connect_timeout,
+                        self.connect_with_fallback(target_addr, fallback),
+                    )
+                    .await?
+                }
+                (None, None, _) => {
                     timeout(self.inner.connect_timeout, TcpStream::connect(target_addr)).await?
                 }
             }
@@ -417,12 +456,33 @@ impl TcpConnector<'_> {
         Err(error(last_err))
     }
 
+    /// If `authority` is already a socket literal (`1.2.3.4:443`, `[ipv6]:443` per RFC 7230),
+    /// return it without DNS. Otherwise `None` so callers resolve the hostname.
+    fn socket_addr_from_authority(authority: &Authority) -> Option<SocketAddr> {
+        authority.as_str().parse().ok()
+    }
+
+    async fn resolve_addrs_timed(
+        &self,
+        host: impl tokio::net::ToSocketAddrs,
+    ) -> std::io::Result<Vec<SocketAddr>> {
+        match timeout(self.inner.connect_timeout, lookup_host(host)).await {
+            Ok(Ok(iter)) => Ok(iter.collect()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "DNS lookup timed out",
+            )),
+        }
+    }
+
     /// Attempts to establish a TCP connection to the given target address.
     ///
     /// This method supports three types of target addresses:
     /// - `SocketAddress`: Connects directly to the specified IP and port.
     /// - `DomainAddress`: Resolves the domain to one or more IP addresses and tries each in order.
-    /// - `Authority`: Resolves the authority (host[:port]) and tries each resolved address.
+    /// - `Authority`: If `host:port` / `[ipv6]:port` parses as [`SocketAddr`], connects there;
+    ///   otherwise resolves the authority string with a DNS timeout, then tries each address.
     ///
     /// The connection will use the configured CIDR, fallback IP, and connection timeout as needed.
     /// If multiple addresses are resolved, it will attempt each until one succeeds or all fail.
@@ -433,12 +493,16 @@ impl TcpConnector<'_> {
                 self.connect_with_addrs(addrs).await
             }
             TargetAddr::DomainAddress(domain, port) => {
-                let addrs = lookup_host((domain, port)).await?;
+                let addrs = self.resolve_addrs_timed((domain.as_str(), port)).await?;
                 self.connect_with_addrs(addrs).await
             }
             TargetAddr::Authority(authority) => {
-                let addrs = lookup_host(authority.as_str()).await?;
-                self.connect_with_addrs(addrs).await
+                if let Some(addr) = Self::socket_addr_from_authority(&authority) {
+                    self.connect_with_addrs(std::iter::once(addr)).await
+                } else {
+                    let addrs = self.resolve_addrs_timed(authority.as_str()).await?;
+                    self.connect_with_addrs(addrs).await
+                }
             }
         }
     }
