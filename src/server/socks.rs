@@ -295,7 +295,7 @@ async fn handle_udp(
 
             preferred_resp = async {
                 let mut buf = [0u8; MAX_UDP_RELAY_PACKET_SIZE];
-            let (len, remote_addr) = preferred_outbound.recv_from(&mut buf).await?;
+                let (len, remote_addr) = preferred_outbound.recv_from(&mut buf).await?;
                 let src_addr = SocketAddr::new(src_ip, src_port.load(Ordering::Relaxed));
 
                 tracing::info!("[SOCKS5][UDP] {src_addr} <- {remote_addr} feedback to incoming, packet size {len}");
